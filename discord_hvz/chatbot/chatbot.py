@@ -30,6 +30,7 @@ class ChatBot:
     bot: HVZBot
     chat_member: discord.Member
     chatbot_manager: ChatBotManager
+    thread: discord.Thread
     target_member: discord.Member = None,
     processing: bool = field(default=False, init=False)
     next_question: int = field(init=False, default=0)
@@ -110,7 +111,7 @@ class ChatBot:
         if self.script.modal:
             await modal.send_modal(interaction, self)
         else:
-            await self.chat_member.send(msg, view=view)
+            await self.thread.send(msg, view=view)
 
     async def receive(self, message: str, interaction: discord.Interaction = None) -> bool:
         """Receives user responses into the chatbot. Returns True if the chatbot is complete."""
@@ -128,7 +129,7 @@ class ChatBot:
             if interaction:
                 await interaction.response.send_message(msg, ephemeral=True)
             else:
-                await self.chat_member.send(msg)
+                await self.thread.send(msg)
             logger.info(
                 f'Chatbot "{self.script.kind}" cancelled by {self.chat_member.name} (Nickname: {self.chat_member.nick})')
             return True
@@ -141,7 +142,7 @@ class ChatBot:
                 match = regex.fullmatch(r'{}'.format(question.valid_regex), message)
                 if match is None:
                     msg = f'{question.rejection_response} Please try again.'
-                    await self.chat_member.send(msg)
+                    await self.thread.send(msg)
                     return False
 
             if question.processor:
@@ -149,7 +150,7 @@ class ChatBot:
                 try:
                     processed_response = question.processor(input_text=message, bot=self.bot)
                 except ValueError as e:
-                    await self.chat_member.send(str(e))
+                    await self.thread.send(str(e))
                     return False
 
             self.responses[self.next_question] = Response(message, processed_response)
@@ -165,9 +166,9 @@ class ChatBot:
                 try:
                     await self.save()
                 except ResponseError as e:
-                    await self.chat_member.send(str(e))
+                    await self.thread.send(str(e))
                 else:
-                    await self.chat_member.send(self.script.ending)
+                    await self.thread.send(self.script.ending)
                     logger.info(
                         f'Chatbot "{self.script.kind}" with {self.chat_member.name} (Nickname: {self.chat_member.nick}) completed successfully.'
                     )
@@ -177,7 +178,7 @@ class ChatBot:
             elif choice == 'modify':
                 self.state = ChatbotState.MODIFYING_SELECTION
             else:
-                await self.chat_member.send(
+                await self.thread.send(
                     'That is an invalid response. Please use the buttons to select, or type "cancel"')
                 return False
 
@@ -189,7 +190,7 @@ class ChatBot:
                     self.state = ChatbotState.MODIFYING
                     break
             else:
-                await self.chat_member.send(
+                await self.thread.send(
                     'That is an invalid response. Please use the buttons to select, or type "cancel"')
                 return False
 
@@ -286,12 +287,22 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
 
             existing = self.active_chatbots.get(member.id)
 
+            # Create private thread here
+
+            thread: discord.Thread = await interaction.channel.create_thread(
+                name=f"Registration for {interaction.user.name}",
+                slowmode_delay=0,
+                invitable=False,
+                reason="Created to register a user for the game."
+            )
+
             new_chatbot = ChatBot(
-                script,
-                self.bot,
-                interaction.user,
-                self,
-                target_member,
+                script = script,
+                bot = self.bot,
+                chat_member = interaction.user,
+                chatbot_manager = self,
+                thread = thread,
+                target_member = target_member,
             )
 
             await new_chatbot.ask_question(existing, interaction=interaction)
@@ -304,14 +315,14 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
             response_msg = e
             error = True
         except discord.Forbidden:
-            response_msg = 'Please check your settings for the server and turn on "Allow Direct Messages."'
+            response_msg = 'The bot is not allowed to create private threads.'
             error = True
         except Exception as e:
             response_msg = f'The chatbot failed unexpectedly. Here is the error you can give to an admin: "{e}"'
             logger.exception(e)
             error = True
         else:
-            response_msg = 'Check your private messages.'
+            response_msg = f'The bot will talk to you in this thread: {new_chatbot.thread.jump_url}.'
         finally:
             # Assume that if there was an error, the interaction was not responded to.
             # Assume that if there was no error and the interaction has been responded to, there is nothing to send.
@@ -369,7 +380,7 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
             chatbot.processing = True
             completed = await chatbot.receive(response_text, interaction=interaction)
         except Exception as e:
-            await chatbot.chat_member.send(
+            await chatbot.thread.send(
                 f'The chatbot had a critical error. You will need to retry from the beginning.')
             self.active_chatbots.pop(author_id)
             logger.exception(e)
@@ -389,7 +400,7 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
     async def shutdown(self):
         """Sends a shutdown message to all members in a chatbot"""
         for i, chatbot in self.active_chatbots.items():
-            await chatbot.chat_member.send(
+            await chatbot.thread.send(
                 'Unfortunately, the bot has shut down. You will need to restart this chatbot when it comes back online.'
             )
 
