@@ -30,7 +30,7 @@ class ChatBot:
     bot: HVZBot
     chat_member: discord.Member
     chatbot_manager: ChatBotManager
-    thread: discord.Thread
+    thread: discord.Thread | None
     target_member: discord.Member = None,
     processing: bool = field(default=False, init=False)
     next_question: int = field(init=False, default=0)
@@ -47,8 +47,8 @@ class ChatBot:
     def __int__(self) -> int:
         return self.chat_member.id
 
-    def remove(self) -> None:
-        self.chatbot_manager.remove_chatbot(self)
+    async def remove(self) -> None:
+        await self.chatbot_manager.remove_chatbot(self)
 
     async def ask_question(self, existing_chatbot: ChatBot = None, interaction: discord.Interaction = None):
         logger.debug(f'Asking question: next_question is {self.next_question}. State: {self.state.name}')
@@ -279,6 +279,7 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
                 script = self.loaded_scripts.get(interaction.custom_id)
                 if not script:
                     raise ConfigError(f'There is no chatbot called "{script}", so this command doesn\'t work.')
+            script: ScriptDatas
 
             member = interaction.user
             config_checker = self.config_checkers[script.kind]
@@ -287,14 +288,17 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
 
             existing = self.active_chatbots.get(member.id)
 
-            # Create private thread here
-
-            thread: discord.Thread = await interaction.channel.create_thread(
-                name=f"Registration for {interaction.user.name}",
-                slowmode_delay=0,
-                invitable=False,
-                reason="Created to register a user for the game."
-            )
+            # Create private thread here for non-modals
+            if not script.modal:
+                thread: discord.Thread | None = await interaction.channel.create_thread(
+                    name=f"Registration for {interaction.user.name}",
+                    auto_archive_duration=10,
+                    slowmode_delay=0,
+                    invitable=False,
+                    reason="Created to register a user for the game."
+                )
+            else:
+                thread = None
 
             new_chatbot = ChatBot(
                 script = script,
@@ -322,27 +326,36 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
             logger.exception(e)
             error = True
         else:
-            response_msg = f'The bot will talk to you in this thread: {new_chatbot.thread.jump_url}.'
+            if new_chatbot.thread:
+                response_msg = f'The bot will talk to you in this thread: {new_chatbot.thread.jump_url}.'
+            else:
+                response_msg = f'Starting chatbot.'
         finally:
             # Assume that if there was an error, the interaction was not responded to.
             # Assume that if there was no error and the interaction has been responded to, there is nothing to send.
             if error or not interaction.response.is_done():
                 await interaction.response.send_message(response_msg, ephemeral=True)
 
-    def remove_chatbot(self, chatbot: int | ChatBot):
-        self.active_chatbots.pop(int(chatbot))
+    async def remove_chatbot(self, chatbot: int | ChatBot, instant_delete = False):
+
+        removed = self.active_chatbots.pop(int(chatbot))
+        if removed.thread:
+            try:
+                await removed.thread.delete()
+            except discord.Forbidden:
+                logger.warning(f"This bot requires the 'manage_threads' permission to delete threads.")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         """
-        A listener function that will receive direct messages from users.
+        A listener function that will receive messages in private threads.
         The happy path will call receive_response()
         """
-        if message.channel.type != discord.ChannelType.private or message.author.bot:
+        if message.channel.type != discord.ChannelType.private_thread or message.author.bot:
             return
         author_id = message.author.id
         response_text = str(message.clean_content)
-        await self.receive_response(author_id, response_text)
+        await self.receive_response(author_id, response_text, thread = message.channel)
 
     async def receive_interaction(self, interaction: discord.Interaction):
         """
@@ -353,28 +366,35 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
         if interaction.type != discord.InteractionType.component:
             logger.warning('receive_interaction got something other than a component')
             return
-        if interaction.channel.type in (discord.ChannelType.private, discord.ChannelType.text):
+        if interaction.channel.type in (discord.ChannelType.text, discord.ChannelType.private_thread):
             user_id = interaction.user.id
 
             custom_id = interaction.data['custom_id']
             response_text = slice_custom_id(custom_id)
 
             try:
-                await self.receive_response(user_id, response_text, interaction=interaction)
+                await self.receive_response(user_id, response_text, interaction=interaction, thread=interaction.channel)
             finally:
                 try:
                     await disable_previous_buttons(interaction)
                 except Exception as e:
                     logger.exception(e)
 
-    async def receive_response(self, author_id: int, response_text: str, interaction: discord.Interaction = None):
+    async def receive_response(
+            self, author_id: int,
+            response_text: str,
+            interaction: discord.Interaction = None,
+            thread: discord.Thread = None
+    ):
         """
         Receives all responses to a chatbot: direct messages, buttons, modals, etc.
         """
-        logger.debug(f'author_id: {author_id} response_text: {response_text}')
+
         chatbot = self.active_chatbots.get(author_id)
 
         if chatbot is None or chatbot.processing is True:
+            return
+        if chatbot.thread and thread != chatbot.thread:
             return
         try:
             chatbot.processing = True
@@ -382,12 +402,12 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
         except Exception as e:
             await chatbot.thread.send(
                 f'The chatbot had a critical error. You will need to retry from the beginning.')
-            self.active_chatbots.pop(author_id)
+            await self.remove_chatbot(chatbot)
             logger.exception(e)
             return
 
         if completed:
-            self.active_chatbots.pop(author_id)
+            await self.remove_chatbot(chatbot)
         else:
             chatbot.processing = False
 
@@ -403,6 +423,7 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
             await chatbot.thread.send(
                 'Unfortunately, the bot has shut down. You will need to restart this chatbot when it comes back online.'
             )
+            await self.remove_chatbot(chatbot)
 
     # TODO: Check if this is the best way to do this
     def get_config_checker(self, key: str, bot: HVZBot) -> ConfigChecker | None:
