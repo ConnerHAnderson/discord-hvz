@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Callable, Awaitable
 from typing import TYPE_CHECKING
 
 import discord
@@ -15,6 +15,7 @@ from discord_hvz.buttons import HVZButton
 from . import modal
 from .chatbot_utilities import Response, ResponseError, ChatbotState, disable_previous_buttons
 from .script_models import load_model
+from . import threads
 
 if TYPE_CHECKING:
     from discord_hvz.main import HVZBot
@@ -233,6 +234,7 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
     The cog that the main bot imports to run the chatbot system.
     """
     bot: HVZBot
+    thread_manager: threads.ThreadManager
     active_chatbots: Dict[int, ChatBot] = {}  # Maps member ids to ChatBots
     loaded_scripts: Dict[str, ScriptDatas] = {}
     config_checkers: Dict[str, ConfigChecker] = {}
@@ -240,6 +242,7 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
 
     def __init__(self, bot: HVZBot):
         self.bot = bot
+        self.thread_manager = threads.ThreadManager(bot)
 
         script_file_model = self.bot.get_cog_startup_data(self)['script_file_model']
         self.loaded_scripts = {s.kind: s for s in script_file_model.scripts}
@@ -290,12 +293,10 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
 
             # Create private thread here for non-modals
             if not script.modal:
-                thread: discord.Thread | None = await interaction.channel.create_thread(
-                    name=f"Registration for {interaction.user.name}",
-                    auto_archive_duration=10,
-                    slowmode_delay=0,
-                    invitable=False,
-                    reason="Created to register a user for the game."
+                thread = await self.thread_manager.create_thread(
+                    channel=interaction.channel,
+                    member=member,
+                    chatbot_type=script.kind
                 )
             else:
                 thread = None
@@ -317,9 +318,6 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
 
         except (ValueError, ConfigError) as e:
             response_msg = e
-            error = True
-        except discord.Forbidden:
-            response_msg = 'The bot is not allowed to create private threads.'
             error = True
         except Exception as e:
             response_msg = f'The chatbot failed unexpectedly. Here is the error you can give to an admin: "{e}"'
