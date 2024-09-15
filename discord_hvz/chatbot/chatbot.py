@@ -338,10 +338,7 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
 
         removed = self.active_chatbots.pop(int(chatbot))
         if removed.thread:
-            try:
-                await removed.thread.delete()
-            except discord.Forbidden:
-                logger.warning(f"This bot requires the 'manage_threads' permission to delete threads.")
+            self.thread_manager.delayed_delete(removed.thread.id, delay_sec=10.0)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
