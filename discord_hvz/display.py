@@ -67,13 +67,24 @@ def create_quickchart(filepath: Path) -> discord.File:
 
     # TODO: Access the database in a more sustainable way
     engine = sqlalchemy.create_engine(f"sqlite+pysqlite:///{str(filepath)}")
-    tags_df = pd.read_sql_table('tags', con=engine, columns=['tag_time', 'revoked_tag'])
+
+    with engine.connect() as conn:
+        tags_df = pd.read_sql(
+            sql="SELECT tag_time, revoked_tag FROM tags",
+            con=conn
+        )
+        members_df = pd.read_sql(
+            sql="SELECT registration_time, oz FROM members",
+            con=conn
+        )
+        tags_df = pd.read_sql(
+            sql="SELECT tag_time, revoked_tag FROM tags",
+            con=conn
+        )
 
     if len(tags_df.index) == 0:  # If there are no tags
         qc.config['options']['title']['text'] = "No Tags Yet"
     else:
-        members_df = pd.read_sql_table('members', con=engine, columns=['registration_time', 'oz'])
-        tags_df = pd.read_sql_table('tags', con=engine, columns=['tag_time', 'revoked_tag'])
 
         def total_players(x):
             total = (members_df.registration_time <= x.tag_time)
@@ -88,8 +99,9 @@ def create_quickchart(filepath: Path) -> discord.File:
             return total.sum()
 
         def format_datapoint(timestamp, y):
+            iso_timestamp = datetime.fromisoformat(timestamp).isoformat()
             return {
-                "x": timestamp.isoformat(),
+                "x": iso_timestamp,
                 "y": y
             }
 
