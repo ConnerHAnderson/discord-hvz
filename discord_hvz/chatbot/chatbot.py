@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Callable, Awaitable
 from typing import TYPE_CHECKING
@@ -11,6 +13,8 @@ from loguru import logger
 
 from discord_hvz.config import config, ConfigError, ConfigChecker
 from discord_hvz.buttons import HVZButton
+from ..utilities import do_after_wait
+from discord_hvz import utilities
 
 from . import modal
 from .chatbot_utilities import Response, ResponseError, ChatbotState, disable_previous_buttons
@@ -48,8 +52,8 @@ class ChatBot:
     def __int__(self) -> int:
         return self.chat_member.id
 
-    async def remove(self) -> None:
-        await self.chatbot_manager.remove_chatbot(self)
+    async def remove(self, delay: float | None =  None) -> None:
+        await self.chatbot_manager.remove_chatbot(self, delay=delay)
 
     async def ask_question(self, existing_chatbot: ChatBot = None, interaction: discord.Interaction = None):
         logger.debug(f'Asking question: next_question is {self.next_question}. State: {self.state.name}')
@@ -337,13 +341,21 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
             if error or not interaction.response.is_done():
                 await interaction.response.send_message(response_msg, ephemeral=True)
 
-    async def remove_chatbot(self, chatbot: int | ChatBot, delay: float|None = None):
+    async def remove_chatbot(self, chatbot_id: int | ChatBot, delay: float | None = None):
 
-        removed_chatbot = self.active_chatbots.pop(int(chatbot))
-        if removed_chatbot.thread:
-            if delay:
-                self.thread_manager.delayed_delete(removed_chatbot.thread.id, delay_sec=delay)
-            await self.thread_manager.delete_thread(removed_chatbot.thread.id)
+        async def remove():
+            try:
+                removed_chatbot = self.active_chatbots.pop(int(chatbot_id))
+            except KeyError:
+                logger.debug(f'Tried to remove a chatbot that was not in the active chatbots list.')
+                return
+            if removed_chatbot.thread:
+                await self.thread_manager.delete_thread(removed_chatbot.thread.id)
+        if delay:
+            asyncio.create_task(do_after_wait(remove, delay=delay))
+        else:
+            await remove()
+
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
