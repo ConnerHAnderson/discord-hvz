@@ -310,6 +310,9 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
                 target_member = target_member,
             )
 
+            # Set the chatbot to expire in an hour. This will prevent chatbots from accumulating
+            await self.remove_chatbot(new_chatbot, delay=3600.0)
+
             await new_chatbot.ask_question(existing, interaction=interaction)
 
             self.active_chatbots[member.id] = new_chatbot
@@ -334,11 +337,13 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
             if error or not interaction.response.is_done():
                 await interaction.response.send_message(response_msg, ephemeral=True)
 
-    async def remove_chatbot(self, chatbot: int | ChatBot, instant_delete = False):
+    async def remove_chatbot(self, chatbot: int | ChatBot, delay: float|None = None):
 
-        removed = self.active_chatbots.pop(int(chatbot))
-        if removed.thread:
-            self.thread_manager.delayed_delete(removed.thread.id, delay_sec=10.0)
+        removed_chatbot = self.active_chatbots.pop(int(chatbot))
+        if removed_chatbot.thread:
+            if delay:
+                self.thread_manager.delayed_delete(removed_chatbot.thread.id, delay_sec=delay)
+            await self.thread_manager.delete_thread(removed_chatbot.thread.id)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -397,12 +402,12 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
         except Exception as e:
             await chatbot.thread.send(
                 f'The chatbot had a critical error. You will need to retry from the beginning.')
-            await self.remove_chatbot(chatbot)
+            await self.remove_chatbot(chatbot, delay=30.0)
             logger.exception(e)
             return
 
         if completed:
-            await self.remove_chatbot(chatbot)
+            await self.remove_chatbot(chatbot, delay=10.0)
         else:
             chatbot.processing = False
 

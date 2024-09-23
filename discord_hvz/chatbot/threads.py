@@ -69,11 +69,11 @@ class ThreadManager:
         # Delete a thread after a delay. This is useful for when a chatbot is done with a thread, but the user
         # still needs to see the last message.
 
-        asyncio.create_task(do_after_wait(self._delete_thread, delay=delay_sec, thread_id=thread_id))
+        asyncio.create_task(do_after_wait(self.delete_thread, delay=delay_sec, thread_id=thread_id))
         #logger.info(f"Thread {thread_id} will be deleted in 5 seconds.")
 
 
-    async def _delete_thread(self, thread_id: int):
+    async def delete_thread(self, thread_id: int):
         # Delete a thread and remove its database entry. Made for use in delayed_delete.
         thread = self.bot.guild.get_thread(thread_id)
         if not thread: return
