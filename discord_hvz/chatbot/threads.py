@@ -70,7 +70,7 @@ class ThreadManager:
         # still needs to see the last message.
 
         asyncio.create_task(do_after_wait(self._delete_thread, delay=delay_sec, thread_id=thread_id))
-        logger.info(f"Thread {thread_id} will be deleted in 5 seconds.")
+        #logger.info(f"Thread {thread_id} will be deleted in 5 seconds.")
 
 
     async def _delete_thread(self, thread_id: int):

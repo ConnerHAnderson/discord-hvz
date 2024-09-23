@@ -416,7 +416,7 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
         """Sends a shutdown message to all members in a chatbot"""
         for i, chatbot in self.active_chatbots.items():
             await chatbot.thread.send(
-                'Unfortunately, the bot has shut down. You will need to restart this chatbot when it comes back online.'
+                'Unfortunately, the HvZ bot has shut down. You will need to restart this chatbot when it comes back online.'
             )
             await self.remove_chatbot(chatbot)
 
