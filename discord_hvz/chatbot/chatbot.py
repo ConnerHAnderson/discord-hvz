@@ -431,11 +431,14 @@ class ChatBotManager(commands.Cog, guild_ids=guild_id_list):
 
     async def shutdown(self):
         """Sends a shutdown message to all members in a chatbot"""
+        chatbots_to_remove = []
         for i, chatbot in self.active_chatbots.items():
-            await chatbot.thread.send(
-                'Unfortunately, the HvZ bot has shut down. You will need to restart this chatbot when it comes back online.'
-            )
-            await self.remove_chatbot(chatbot)
+            # await chatbot.thread.send(
+            #     'Unfortunately, the HvZ bot has shut down. You will need to restart this chatbot when it comes back online.'
+            # )
+            chatbots_to_remove.append(i)
+        for chatbot_id in chatbots_to_remove:
+            await self.remove_chatbot(chatbot_id)
 
     # TODO: Check if this is the best way to do this
     def get_config_checker(self, key: str, bot: HVZBot) -> ConfigChecker | None:
