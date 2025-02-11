@@ -576,6 +576,69 @@ class AdminCommandsCog(commands.Cog, guild_ids=guild_id_list):
             await ctx.respond('Could not change permissions in the channels. Please give the bot permission to.')
             logger.warning(e)
 
+    # A command called hide_oz that does the opposite of the reveal_oz command
+    @slash_command(name='hide_oz', description='OZ identities are concealed from the humans.')
+    async def hide_oz(self, ctx: discord.ApplicationContext):
+        bot = self.bot
+        try:
+            ozs = bot.db.get_rows('members', 'oz', True)
+        except ValueError as e:
+            await ctx.respond('There are no OZs. Use the /oz command to set some.')
+            return
+        for oz in ozs:
+            member = bot.guild.get_member(int(oz["id"]))
+            if member:
+                await member.remove_roles(bot.roles.zombie)
+                await member.add_roles(bot.roles.human)
+
+                try:
+                    await bot.channels.report_tags.set_permissions(member, read_messages=True)
+                    await bot.channels.zombie_chat.set_permissions(member, read_messages=True)
+                except discord.Forbidden as e:
+                    await ctx.respond(
+                        'Could not change permissions in the report_tags and/or zombie_chat channels. Please give the bot permission to.')
+                    logger.debug(e)
+                except Exception as e:
+                    await ctx.respond(f'Could not change permissions for member: <@{member.id}>')
+                    logger.warning(e)
+        config.silent_oz = True
+        await ctx.respond(
+            'The OZs have been hidden. They have the human role and not the zombie role. '
+            f'They can now access the <#{bot.channels.report_tags.id}> and <#{bot.channels.zombie_chat.id}> channels despite being human because of *special* permissions.'
+            'The configuration option silent_oz is now True, which means OZs won\'t show up in tag announcements and other displays.'
+        )
+
+    @slash_command(name='reveal_oz', description='OZ identities are no longer concealed from the humans.')
+    async def reveal_oz(self, ctx: discord.ApplicationContext):
+        bot = self.bot
+        try:
+            ozs = bot.db.get_rows('members', 'oz', True)
+        except ValueError as e:
+            await ctx.respond('There are no OZs. Use the /oz command to set some.')
+            return
+        for oz in ozs:
+            member = bot.guild.get_member(int(oz["id"]))
+            if member:
+                await member.add_roles(bot.roles.zombie)
+                await member.remove_roles(bot.roles.human)
+
+                try:
+                    await bot.channels.report_tags.set_permissions(member, overwrite=None)
+                    await bot.channels.zombie_chat.set_permissions(member, overwrite=None)
+                except discord.Forbidden as e:
+                    await ctx.respond(
+                        'Could not change permissions in the report_tags and/or zombie_chat channels. Please give the bot permission to.')
+                    logger.debug(e)
+                except Exception as e:
+                    await ctx.respond(f'Could not change permissions for member: <@{member.id}>')
+                    logger.warning(e)
+        config.silent_oz = False
+        await ctx.respond(
+            'The OZs have been revealed. They have the zombie role and not the human role. '
+            f'They no longer have *special* permissions for the <#{bot.channels.report_tags.id}> and <#{bot.channels.zombie_chat.id}> channels.'
+            'The configuration option silent_oz is now False, which means OZs will show up in tag announcements and other displays.'
+        )
+
     @slash_command(name='download_config', description='Sends you the config files, which you can edit and re-upload.')
     async def download_config(self, ctx: discord.ApplicationContext):
 
