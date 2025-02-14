@@ -343,6 +343,7 @@ def main():
         bot.load_extension('.commands', package = 'discord_hvz')
         bot.load_extension('.display', package = 'discord_hvz')
         bot.load_extension('.item_tracker', package = 'discord_hvz')
+        bot.load_extension('.control_board', package = 'discord_hvz')
 
         bot.run(TOKEN)
 
